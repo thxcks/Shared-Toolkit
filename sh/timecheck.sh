@@ -1,5 +1,6 @@
 #!/bin/bash
 
+#Read log file.
 echo "enter user:"
 read user
 
@@ -53,7 +54,11 @@ filter_by_time() {
         awk -v start="$start_time" -v end="$end_time" '{
             split($4, a, ":")
             t = a[2]":"a[3]
-            if (t >= start && t <= end) print
+            if (start <= end) {
+                if (t >= start && t <= end) print
+            } else {
+                if (t >= start || t <= end) print
+            }
         }'
     else
         cat
