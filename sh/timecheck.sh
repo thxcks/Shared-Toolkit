@@ -1,6 +1,5 @@
 #!/bin/bash
 
-#Read log file.
 echo "enter user:"
 read user
 
@@ -26,9 +25,7 @@ echo "#######################################################"
 echo "Please note, this log starts at:" `head -1 /home/$user/access-logs/$log_file | awk '{print $4}' | tr -d [`
 echo "#######################################################"
 
-# ─────────────────────────────────────────────
-# Time range filter
-# ─────────────────────────────────────────────
+
 echo ""
 echo "Would you like to filter results by a specific time range? (yes/no):"
 read use_time_filter
@@ -39,7 +36,6 @@ if [[ "$use_time_filter" =~ ^[Yy] ]]; then
     echo "Enter end time (e.g. 10:00 or 20:00 — use 24hr format):"
     read end_time
 
-    # Validate basic HH:MM format
     if ! [[ "$start_time" =~ ^[0-9]{2}:[0-9]{2}$ ]] || ! [[ "$end_time" =~ ^[0-9]{2}:[0-9]{2}$ ]]; then
         echo "Invalid time format. Please use HH:MM (e.g. 09:00). Proceeding without time filter."
         use_time_filter="no"
@@ -51,8 +47,7 @@ if [[ "$use_time_filter" =~ ^[Yy] ]]; then
     fi
 fi
 
-# Helper: apply time filter to stdin if enabled, otherwise pass through
-# $4 looks like [10/Feb/2026:10:31:50 — split on ":" gives [date, HH, MM, SS]
+
 filter_by_time() {
     if [[ "$use_time_filter" =~ ^[Yy] ]]; then
         awk -v start="$start_time" -v end="$end_time" '{
