@@ -52,11 +52,12 @@ if [[ "$use_time_filter" =~ ^[Yy] ]]; then
 fi
 
 # Helper: apply time filter to stdin if enabled, otherwise pass through
-# $4 looks like [10/Feb/2026:10:31:50 — time HH:MM starts at char 13, length 5
+# $4 looks like [10/Feb/2026:10:31:50 — split on ":" gives [date, HH, MM, SS]
 filter_by_time() {
     if [[ "$use_time_filter" =~ ^[Yy] ]]; then
         awk -v start="$start_time" -v end="$end_time" '{
-            t = substr($4, 13, 5)
+            split($4, a, ":")
+            t = a[2]":"a[3]
             if (t >= start && t <= end) print
         }'
     else
