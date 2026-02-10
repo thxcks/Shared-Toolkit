@@ -48,22 +48,16 @@ if [[ "$use_time_filter" =~ ^[Yy] ]]; then
         echo "Filtering results between ${start_time} and ${end_time}..."
         echo ""
 
-        # Build an awk time-range filter function for reuse
-        # Log time format: [10/Feb/2026:10:31:50 +0000]
-        # We extract HH:MM from the timestamp field ($4) and compare as strings (works since zero-padded)
-        TIME_FILTER="awk -v start=\"${start_time}\" -v end=\"${end_time}\" '{
-            match(\$4, /[0-9]{2}:[0-9]{2}/, t)
-            if (t[0] >= start && t[0] <= end) print
-        }'"
     fi
 fi
 
 # Helper: apply time filter to stdin if enabled, otherwise pass through
+# $4 looks like [10/Feb/2026:10:31:50 — time HH:MM starts at char 13, length 5
 filter_by_time() {
     if [[ "$use_time_filter" =~ ^[Yy] ]]; then
         awk -v start="$start_time" -v end="$end_time" '{
-            match($4, /[0-9]{2}:[0-9]{2}/, t)
-            if (t[0] >= start && t[0] <= end) print
+            t = substr($4, 13, 5)
+            if (t >= start && t <= end) print
         }'
     else
         cat
