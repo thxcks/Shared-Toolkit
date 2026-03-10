@@ -55,7 +55,7 @@ trap "rm -f $WORK_FILE" EXIT
 
 # Step 1: filter by date using grep (simple, fast, reliable)
 if [[ -n "$FILTER_DATE" ]]; then
-  grep "$FILTER_DATE" "$LOG_FILE" > "$WORK_FILE"
+  grep "\[${FILTER_DATE}:" "$LOG_FILE" > "$WORK_FILE"
 else
   cp "$LOG_FILE" "$WORK_FILE"
 fi
