@@ -25,11 +25,6 @@ ls -lhS /home/$user/access-logs/
 echo "Enter which log file you wish to check:"
 read -r log_file
 
-echo "#######################################################"
-echo "Please note, this log starts at:" $(head -1 /home/$user/access-logs/$log_file | awk '{print $4}' | tr -d [)
-echo "#######################################################"
-echo ""
-
 LOG_FILE="/home/$user/access-logs/$log_file"
 
 if [[ ! -f "$LOG_FILE" ]]; then
@@ -37,13 +32,20 @@ if [[ ! -f "$LOG_FILE" ]]; then
   exit 1
 fi
 
-# ---------- time filter ------------------------------------------------------
-echo "Filter by time? Enter a start and end time to narrow results,"
-echo "or press ENTER twice to process the full log."
+echo "#######################################################"
+echo "Please note, this log starts at:" $(head -1 "$LOG_FILE" | awk '{print $4}' | tr -d [)
+echo "                  and ends at  :" $(tail -1 "$LOG_FILE" | awk '{print $4}' | tr -d [)
+echo "#######################################################"
 echo ""
-printf "Start time (HH:MM, e.g. 21:00) or ENTER to skip: "
+
+# ---------- date + time filter -----------------------------------------------
+echo "Filter by date and/or time? Press ENTER to skip any field."
+echo ""
+printf "Date (DD/Mon/YYYY, e.g. 09/Mar/2026) or ENTER for all dates: "
+read -r FILTER_DATE
+printf "Start time (HH:MM, e.g. 21:00)       or ENTER to skip     : "
 read -r TIME_START
-printf "End time   (HH:MM, e.g. 22:00) or ENTER to skip: "
+printf "End time   (HH:MM, e.g. 22:00)       or ENTER to skip     : "
 read -r TIME_END
 echo ""
 
@@ -51,32 +53,47 @@ echo ""
 WORK_FILE=$(mktemp /tmp/log_analyse_XXXXXX)
 trap "rm -f $WORK_FILE" EXIT
 
-if [[ -n "$TIME_START" && -n "$TIME_END" ]]; then
-  awk -v start="$TIME_START" -v end="$TIME_END" '
-  {
-    match($0, /[0-9]{2}\/[A-Za-z]+\/[0-9]{4}:([0-9]{2}:[0-9]{2})/, arr)
-    if (arr[1] != "" && arr[1] >= start && arr[1] <= end) print
-  }' "$LOG_FILE" > "$WORK_FILE"
-  echo "Time filter applied : $TIME_START — $TIME_END"
-elif [[ -n "$TIME_START" ]]; then
-  awk -v start="$TIME_START" '
-  {
-    match($0, /[0-9]{2}\/[A-Za-z]+\/[0-9]{4}:([0-9]{2}:[0-9]{2})/, arr)
-    if (arr[1] != "" && arr[1] >= start) print
-  }' "$LOG_FILE" > "$WORK_FILE"
-  echo "Time filter applied : from $TIME_START onwards"
-elif [[ -n "$TIME_END" ]]; then
-  awk -v end="$TIME_END" '
-  {
-    match($0, /[0-9]{2}\/[A-Za-z]+\/[0-9]{4}:([0-9]{2}:[0-9]{2})/, arr)
-    if (arr[1] != "" && arr[1] <= end) print
-  }' "$LOG_FILE" > "$WORK_FILE"
-  echo "Time filter applied : up to $TIME_END"
+# Build awk filter combining date and time
+awk -v date="$FILTER_DATE" -v start="$TIME_START" -v end="$TIME_END" '
+{
+  # Extract date portion: DD/Mon/YYYY
+  match($0, /([0-9]{2}\/[A-Za-z]+\/[0-9]{4}):([0-9]{2}:[0-9]{2})/, arr)
+  log_date = arr[1]
+  log_time = arr[2]
+
+  if (log_date == "" && log_time == "") { next }
+
+  # Date filter
+  if (date != "" && log_date != date) { next }
+
+  # Time filter
+  if (start != "" && log_time < start) { next }
+  if (end   != "" && log_time > end)   { next }
+
+  print
+}' "$LOG_FILE" > "$WORK_FILE"
+
+# Report what filter was applied
+FILTER_DESC=""
+[[ -n "$FILTER_DATE"  ]] && FILTER_DESC+="Date: $FILTER_DATE  "
+[[ -n "$TIME_START"   ]] && FILTER_DESC+="From: $TIME_START  "
+[[ -n "$TIME_END"     ]] && FILTER_DESC+="To: $TIME_END"
+
+if [[ -n "$FILTER_DESC" ]]; then
+  echo "Filter applied : $FILTER_DESC"
 else
   cp "$LOG_FILE" "$WORK_FILE"
-  echo "No time filter — processing full log."
+  echo "No filter — processing full log."
 fi
+
+FILTERED_COUNT=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$WORK_FILE" || true)
+echo "Matched lines  : $FILTERED_COUNT"
 echo ""
+
+if [[ "$FILTERED_COUNT" -eq 0 ]]; then
+  echo "No log entries matched your filter. Check the date format (DD/Mon/YYYY) and try again."
+  exit 1
+fi
 
 # ---------- extract unique IPs -----------------------------------------------
 UNIQUE_IPS=$(grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$WORK_FILE" | sort -u)
@@ -173,8 +190,8 @@ IFS=',' read -ra CODES <<< "$BLOCK_COUNTRIES"
 echo ""
 echo "# ============================================================"
 echo "# .htaccess Blocklist — generated $(date)"
-echo "# Blocked countries: $BLOCK_COUNTRIES"
-[[ -n "$TIME_START" || -n "$TIME_END" ]] && echo "# Time filter: ${TIME_START:-start} — ${TIME_END:-end}"
+echo "# Blocked countries : $BLOCK_COUNTRIES"
+[[ -n "$FILTER_DESC" ]] && echo "# Filter            : $FILTER_DESC"
 echo "# ============================================================"
 echo ""
 echo "Order Allow,Deny"
