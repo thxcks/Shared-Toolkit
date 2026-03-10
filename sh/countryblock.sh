@@ -49,40 +49,42 @@ printf "End time   (HH:MM, e.g. 22:00)       or ENTER to skip     : "
 read -r TIME_END
 echo ""
 
-# Use a temp file as working copy — cleaned up automatically on exit
+# Use temp files — cleaned up automatically on exit
 WORK_FILE=$(mktemp /tmp/log_analyse_XXXXXX)
 trap "rm -f $WORK_FILE" EXIT
 
-# Build awk filter combining date and time
-awk -v date="$FILTER_DATE" -v start="$TIME_START" -v end="$TIME_END" '
-{
-  # Extract date portion: DD/Mon/YYYY
-  match($0, /([0-9]{2}\/[A-Za-z]+\/[0-9]{4}):([0-9]{2}:[0-9]{2})/, arr)
-  log_date = arr[1]
-  log_time = arr[2]
+# Step 1: filter by date using grep (simple, fast, reliable)
+if [[ -n "$FILTER_DATE" ]]; then
+  grep "$FILTER_DATE" "$LOG_FILE" > "$WORK_FILE"
+else
+  cp "$LOG_FILE" "$WORK_FILE"
+fi
 
-  if (log_date == "" && log_time == "") { next }
+# Step 2: filter by time using standard awk
+# Log format: IP - - [DD/Mon/YYYY:HH:MM:SS +0000] ...
+# $4 = [DD/Mon/YYYY:HH:MM:SS  — split on : gives [2]=HH [3]=MM
+if [[ -n "$TIME_START" || -n "$TIME_END" ]]; then
+  TMP2=$(mktemp /tmp/log_analyse_XXXXXX)
+  awk -v start="${TIME_START:-00:00}" -v end="${TIME_END:-23:59}" '
+  {
+    n = split($4, t, ":")
+    if (n >= 3) {
+      hhmm = t[2] ":" t[3]
+      if (hhmm >= start && hhmm <= end) print
+    }
+  }' "$WORK_FILE" > "$TMP2"
+  mv "$TMP2" "$WORK_FILE"
+fi
 
-  # Date filter
-  if (date != "" && log_date != date) { next }
-
-  # Time filter
-  if (start != "" && log_time < start) { next }
-  if (end   != "" && log_time > end)   { next }
-
-  print
-}' "$LOG_FILE" > "$WORK_FILE"
-
-# Report what filter was applied
+# Build filter description
 FILTER_DESC=""
-[[ -n "$FILTER_DATE"  ]] && FILTER_DESC+="Date: $FILTER_DATE  "
-[[ -n "$TIME_START"   ]] && FILTER_DESC+="From: $TIME_START  "
-[[ -n "$TIME_END"     ]] && FILTER_DESC+="To: $TIME_END"
+[[ -n "$FILTER_DATE" ]] && FILTER_DESC+="Date: $FILTER_DATE  "
+[[ -n "$TIME_START"  ]] && FILTER_DESC+="From: $TIME_START  "
+[[ -n "$TIME_END"    ]] && FILTER_DESC+="To: $TIME_END"
 
 if [[ -n "$FILTER_DESC" ]]; then
   echo "Filter applied : $FILTER_DESC"
 else
-  cp "$LOG_FILE" "$WORK_FILE"
   echo "No filter — processing full log."
 fi
 
@@ -98,7 +100,7 @@ fi
 # ---------- extract unique IPs -----------------------------------------------
 UNIQUE_IPS=$(grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$WORK_FILE" | sort -u)
 TOTAL_UNIQUE=$(echo "$UNIQUE_IPS" | grep -c . || true)
-TOTAL_REQUESTS=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$WORK_FILE" || true)
+TOTAL_REQUESTS=$FILTERED_COUNT
 
 echo "Found $TOTAL_UNIQUE unique IPs across $TOTAL_REQUESTS requests. Looking up countries..." >&2
 echo "" >&2
