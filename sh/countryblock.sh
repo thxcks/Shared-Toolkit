@@ -1,4 +1,8 @@
 #!/bin/bash
+# =============================================================================
+# Log Analyser & .htaccess Blocklist Generator
+# No dependencies beyond curl (pre-installed on virtually every server)
+# =============================================================================
 
 BLOCK_COUNTRIES=""
 USE_CIDR=false
@@ -33,10 +37,51 @@ if [[ ! -f "$LOG_FILE" ]]; then
   exit 1
 fi
 
+# ---------- time filter ------------------------------------------------------
+echo "Filter by time? Enter a start and end time to narrow results,"
+echo "or press ENTER twice to process the full log."
+echo ""
+printf "Start time (HH:MM, e.g. 21:00) or ENTER to skip: "
+read -r TIME_START
+printf "End time   (HH:MM, e.g. 22:00) or ENTER to skip: "
+read -r TIME_END
+echo ""
+
+# Use a temp file as working copy — cleaned up automatically on exit
+WORK_FILE=$(mktemp /tmp/log_analyse_XXXXXX)
+trap "rm -f $WORK_FILE" EXIT
+
+if [[ -n "$TIME_START" && -n "$TIME_END" ]]; then
+  awk -v start="$TIME_START" -v end="$TIME_END" '
+  {
+    match($0, /[0-9]{2}\/[A-Za-z]+\/[0-9]{4}:([0-9]{2}:[0-9]{2})/, arr)
+    if (arr[1] != "" && arr[1] >= start && arr[1] <= end) print
+  }' "$LOG_FILE" > "$WORK_FILE"
+  echo "Time filter applied : $TIME_START — $TIME_END"
+elif [[ -n "$TIME_START" ]]; then
+  awk -v start="$TIME_START" '
+  {
+    match($0, /[0-9]{2}\/[A-Za-z]+\/[0-9]{4}:([0-9]{2}:[0-9]{2})/, arr)
+    if (arr[1] != "" && arr[1] >= start) print
+  }' "$LOG_FILE" > "$WORK_FILE"
+  echo "Time filter applied : from $TIME_START onwards"
+elif [[ -n "$TIME_END" ]]; then
+  awk -v end="$TIME_END" '
+  {
+    match($0, /[0-9]{2}\/[A-Za-z]+\/[0-9]{4}:([0-9]{2}:[0-9]{2})/, arr)
+    if (arr[1] != "" && arr[1] <= end) print
+  }' "$LOG_FILE" > "$WORK_FILE"
+  echo "Time filter applied : up to $TIME_END"
+else
+  cp "$LOG_FILE" "$WORK_FILE"
+  echo "No time filter — processing full log."
+fi
+echo ""
+
 # ---------- extract unique IPs -----------------------------------------------
-UNIQUE_IPS=$(grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$LOG_FILE" | sort -u)
+UNIQUE_IPS=$(grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$WORK_FILE" | sort -u)
 TOTAL_UNIQUE=$(echo "$UNIQUE_IPS" | grep -c . || true)
-TOTAL_REQUESTS=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$LOG_FILE" || true)
+TOTAL_REQUESTS=$(grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$WORK_FILE" || true)
 
 echo "Found $TOTAL_UNIQUE unique IPs across $TOTAL_REQUESTS requests. Looking up countries..." >&2
 echo "" >&2
@@ -91,7 +136,7 @@ while IFS= read -r line; do
   [[ -z "$local_ip" ]] && continue
   code="${IP_COUNTRY[$local_ip]:-UNKNOWN}"
   COUNTRY_COUNT["$code"]=$(( ${COUNTRY_COUNT["$code"]:-0} + 1 ))
-done < "$LOG_FILE"
+done < "$WORK_FILE"
 
 # ---------- print summary ----------------------------------------------------
 echo "=============================================="
@@ -129,6 +174,7 @@ echo ""
 echo "# ============================================================"
 echo "# .htaccess Blocklist — generated $(date)"
 echo "# Blocked countries: $BLOCK_COUNTRIES"
+[[ -n "$TIME_START" || -n "$TIME_END" ]] && echo "# Time filter: ${TIME_START:-start} — ${TIME_END:-end}"
 echo "# ============================================================"
 echo ""
 echo "Order Allow,Deny"
